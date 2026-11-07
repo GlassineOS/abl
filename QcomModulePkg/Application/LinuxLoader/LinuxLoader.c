@@ -465,6 +465,30 @@ na1_vb_done:
       }
     }
 
+    /* NA1: Override VBCmdLine with stock-matching parameters.
+     *
+     * The NO_AVB path (LoadImageNoAuthWrapper) set VBCmdLine to a bare
+     * "root=/dev/mmcblk0pN" via GetSystemPath. The stock ABL (AVB_1) instead
+     * produced dm-verity params + verified boot state. We overwrite the
+     * buffer to replicate the stock cmdline exactly.
+     *
+     * Buffer was allocated at DTB_PAD_SIZE (1024) by VBAllocateCmdLine. */
+    if (Info.VBCmdLine != NULL) {
+      STATIC CONST CHAR8 *NA1VBCmdLine =
+          " veritykeyid=id:7e4333f9bba00adfe0ede979e28ed1920492b40f"
+          " root=/dev/dm-0"
+          " dm=\"system none ro,0 1 android-verity /dev/mmcblk0p10\""
+          " androidboot.verifiedbootstate=orange"
+          " androidboot.keymaster=1"
+          "  androidboot.veritymode=enforcing";
+
+      AsciiStrCpyS (Info.VBCmdLine, Info.VBCmdLineLen, NA1VBCmdLine);
+      Info.VBCmdLineFilledLen = AsciiStrLen (NA1VBCmdLine);
+
+      DEBUG ((EFI_D_INFO, "NA1: VBCmdLine overridden, len=%d\n",
+              Info.VBCmdLineFilledLen));
+    }
+
     BootLinux (&Info);
   }
 
