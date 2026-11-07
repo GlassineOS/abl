@@ -67,6 +67,9 @@
   BootLib
   StackCanary
   DebugLib
+  IoLib
+  DxeServicesTableLib
+  TimerLib
   UefiHiiServicesLib
   UbsanLib
 

@@ -45,10 +45,14 @@ found at
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#include <PiDxe.h>
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
+#include <Library/DxeServicesTableLib.h>
+#include <Library/IoLib.h>
+#include <Library/TimerLib.h>
 #include <Library/DeviceInfo.h>
 #include <Library/DevicePathLib.h>
 #include <Library/MemoryAllocationLib.h>
@@ -2399,6 +2403,250 @@ CmdOemRebootRecovery (CONST CHAR8 *arg, VOID *data, UINT32 sz)
   FastbootFail ("Failed to reboot to recovery");
 }
 
+/* ================================================================
+ * NA1: Live hall sensor diagnostic via GCC clock enable.
+ *
+ * TLMM sits on CNOC. CNOC bus clocks are checked/enabled, then we
+ * attempt to read GPIO registers with a watchdog armed. If the read
+ * causes a bus stall (XPU or other access control), the watchdog
+ * fires and the device reboots safely to Android.
+ *
+ * Multiple TLMM address modes diagnose whether the hang is
+ * XPU-based (all addresses) or address-specific:
+ *
+ *   fastboot oem test-sensor          flat GPIO 105 (0x03069004)
+ *   fastboot oem test-sensor south    south tile GPIO 105 (0x03169004)
+ *   fastboot oem test-sensor gpio0    flat GPIO 0 (0x03000004)
+ *   fastboot oem test-sensor sbase    south tile GPIO 0 (0x03100004)
+ *   fastboot oem test-sensor clocks   clock diagnostics only
+ * ================================================================ */
+
+#define NA1_GCC_BASE          0x00100000
+#define NA1_GCC_SNOC_CNOC     (NA1_GCC_BASE + 0x4018)
+#define NA1_GCC_CNOC_SOUTH    (NA1_GCC_BASE + 0x501C)
+#define NA1_GCC_CNOC_NORTH    (NA1_GCC_BASE + 0x5020)
+
+#define CBCR_CLK_ENABLE       BIT(0)
+#define CBCR_CLK_OFF          BIT(31)
+
+#define NA1_WATCHDOG_SECONDS  5
+
+/* Enable a GCC clock branch. Returns TRUE if clock is running. */
+STATIC BOOLEAN
+Na1EnableClockBranch (
+  IN  UINTN  CbcrAddr,
+  OUT UINT32 *PreVal,
+  OUT UINT32 *PostVal
+  )
+{
+  UINT32 Val;
+  UINTN  Tries = 1000;  /* ~1ms at 1us per iteration */
+
+  Val = MmioRead32 (CbcrAddr);
+  *PreVal = Val;
+
+  /* Already running? */
+  if (!(Val & CBCR_CLK_OFF)) {
+    *PostVal = Val;
+    return TRUE;
+  }
+
+  /* Set CLK_ENABLE */
+  Val |= CBCR_CLK_ENABLE;
+  MmioWrite32 (CbcrAddr, Val);
+
+  /* Poll CLK_OFF → 0 */
+  while (Tries-- > 0) {
+    Val = MmioRead32 (CbcrAddr);
+    if (!(Val & CBCR_CLK_OFF)) {
+      *PostVal = Val;
+      return TRUE;
+    }
+    MicroSecondDelay (1);
+  }
+
+  *PostVal = Val;
+  return FALSE;
+}
+
+/* GCD-map a physical page as MMIO if not already mapped. */
+STATIC EFI_STATUS
+Na1EnsureGcdMapped (
+  IN EFI_PHYSICAL_ADDRESS Base,
+  IN UINT64               Size
+  )
+{
+  EFI_GCD_MEMORY_SPACE_DESCRIPTOR GcdDesc;
+  EFI_STATUS Status;
+
+  Status = gDS->GetMemorySpaceDescriptor (Base, &GcdDesc);
+  if (Status == EFI_SUCCESS &&
+      GcdDesc.GcdMemoryType != EfiGcdMemoryTypeNonExistent) {
+    return EFI_SUCCESS;  /* Already mapped */
+  }
+
+  Status = gDS->AddMemorySpace (
+                  EfiGcdMemoryTypeMemoryMappedIo,
+                  Base, Size, 0);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  /* SetMemorySpaceAttributes(UC) returns Unsupported on ARM — that's OK */
+  gDS->SetMemorySpaceAttributes (Base, Size, EFI_MEMORY_UC);
+  return EFI_SUCCESS;
+}
+
+STATIC VOID
+CmdOemTestSensor (CONST CHAR8 *arg, VOID *data, UINT32 sz)
+{
+  CHAR8   Msg[MAX_RSP_SIZE];
+  UINT32  Pre, Post;
+  BOOLEAN ClkOk;
+  EFI_STATUS Status;
+  EFI_PHYSICAL_ADDRESS PageBase;
+  UINTN   CfgAddr, InOutAddr;
+  CONST CHAR8 *ModeName;
+  BOOLEAN ClocksOnly = FALSE;
+
+  /* Skip leading whitespace in arg */
+  CONST CHAR8 *p = arg;
+  while (p != NULL && *p == ' ') p++;
+
+  /* Select TLMM address mode */
+  if (p == NULL || *p == '\0') {
+    PageBase  = 0x03069000ULL;
+    CfgAddr   = 0x03069000;
+    InOutAddr = 0x03069004;
+    ModeName  = "FLAT GPIO105";
+  } else if (AsciiStrnCmp (p, "south", 5) == 0) {
+    PageBase  = 0x03169000ULL;
+    CfgAddr   = 0x03169000;
+    InOutAddr = 0x03169004;
+    ModeName  = "SOUTH GPIO105";
+  } else if (AsciiStrnCmp (p, "gpio0", 5) == 0) {
+    PageBase  = 0x03000000ULL;
+    CfgAddr   = 0x03000000;
+    InOutAddr = 0x03000004;
+    ModeName  = "FLAT GPIO0";
+  } else if (AsciiStrnCmp (p, "sbase", 5) == 0) {
+    PageBase  = 0x03100000ULL;
+    CfgAddr   = 0x03100000;
+    InOutAddr = 0x03100004;
+    ModeName  = "SOUTH GPIO0";
+  } else if (AsciiStrnCmp (p, "clocks", 6) == 0) {
+    ClocksOnly = TRUE;
+    PageBase  = 0;
+    CfgAddr   = 0;
+    InOutAddr = 0;
+    ModeName  = "CLOCKS ONLY";
+  } else {
+    FastbootFail ("Usage: oem test-sensor [south|gpio0|sbase|clocks]");
+    return;
+  }
+
+  AsciiSPrint (Msg, sizeof (Msg), "NA1 Sensor Diag v2.3b — %a", ModeName);
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+
+  /* Step 1: GCD-map GCC region */
+  Status = Na1EnsureGcdMapped (NA1_GCC_BASE, 0xC0000);
+  if (EFI_ERROR (Status)) {
+    AsciiSPrint (Msg, sizeof (Msg), "GCC GCD map failed: %r", Status);
+    FastbootFail (Msg);
+    return;
+  }
+  FastbootInfo ("GCC region mapped OK");
+  WaitForTransferComplete ();
+
+  /* Step 2: CNOC clock branches */
+  ClkOk = Na1EnableClockBranch (NA1_GCC_SNOC_CNOC, &Pre, &Post);
+  AsciiSPrint (Msg, sizeof (Msg), "SNOC_CNOC: pre=0x%08x post=0x%08x %a",
+               Pre, Post, ClkOk ? "ON" : "TIMEOUT");
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+  if (!ClkOk) {
+    FastbootFail ("SNOC_CNOC clock timed out");
+    return;
+  }
+
+  ClkOk = Na1EnableClockBranch (NA1_GCC_CNOC_SOUTH, &Pre, &Post);
+  AsciiSPrint (Msg, sizeof (Msg), "CNOC_SOUTH: pre=0x%08x post=0x%08x %a",
+               Pre, Post, ClkOk ? "ON" : "TIMEOUT");
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+
+  ClkOk = Na1EnableClockBranch (NA1_GCC_CNOC_NORTH, &Pre, &Post);
+  AsciiSPrint (Msg, sizeof (Msg), "CNOC_NORTH: pre=0x%08x post=0x%08x %a",
+               Pre, Post, ClkOk ? "ON" : "TIMEOUT");
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+
+  FastbootInfo ("CNOC clocks checked");
+  WaitForTransferComplete ();
+
+  if (ClocksOnly) {
+    FastbootOkay ("");
+    return;
+  }
+
+  /* Step 3: GCD-map target TLMM page */
+  Status = Na1EnsureGcdMapped (PageBase, 0x1000);
+  if (EFI_ERROR (Status)) {
+    AsciiSPrint (Msg, sizeof (Msg), "TLMM GCD map 0x%08x failed: %r",
+                 (UINTN)PageBase, Status);
+    FastbootFail (Msg);
+    return;
+  }
+  AsciiSPrint (Msg, sizeof (Msg), "TLMM page 0x%08x mapped OK", (UINTN)PageBase);
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+
+  /* Step 4: Arm watchdog and read GPIO.
+   * If MmioRead32 causes a bus stall (XPU), the watchdog fires after
+   * NA1_WATCHDOG_SECONDS and reboots the device safely to Android. */
+  AsciiSPrint (Msg, sizeof (Msg), "Arming %ds watchdog, reading 0x%08x...",
+               NA1_WATCHDOG_SECONDS, CfgAddr);
+  FastbootInfo (Msg);
+  WaitForTransferComplete ();
+  FastbootInfo (">>> If device reboots, read hung (XPU/bus stall)");
+  WaitForTransferComplete ();
+
+  gBS->SetWatchdogTimer (NA1_WATCHDOG_SECONDS, 0, 0, NULL);
+
+  {
+    UINT32 GpioCfg  = MmioRead32 (CfgAddr);
+    UINT32 GpioVal  = MmioRead32 (InOutAddr);
+
+    /* Cancel watchdog — reads succeeded */
+    gBS->SetWatchdogTimer (0, 0, 0, NULL);
+
+    FastbootInfo (">>> TLMM read OK! No XPU block.");
+    WaitForTransferComplete ();
+
+    AsciiSPrint (Msg, sizeof (Msg), "GPIO_CFG (0x%08x) = 0x%08x", CfgAddr, GpioCfg);
+    FastbootInfo (Msg);
+    WaitForTransferComplete ();
+
+    AsciiSPrint (Msg, sizeof (Msg), "  PULL=%d FUNC=%d OE=%d",
+                 GpioCfg & 0x3, (GpioCfg >> 2) & 0xF, (GpioCfg >> 9) & 0x1);
+    FastbootInfo (Msg);
+    WaitForTransferComplete ();
+
+    AsciiSPrint (Msg, sizeof (Msg), "GPIO_INOUT(0x%08x) = 0x%08x", InOutAddr, GpioVal);
+    FastbootInfo (Msg);
+    WaitForTransferComplete ();
+
+    AsciiSPrint (Msg, sizeof (Msg), "  bit0=%d -> Cover %a",
+                 GpioVal & 0x1,
+                 (GpioVal & 0x1) ? "OPEN" : "CLOSED");
+    FastbootInfo (Msg);
+    WaitForTransferComplete ();
+  }
+
+  FastbootOkay ("");
+}
+
 #if (defined(ENABLE_DEVICE_CRITICAL_LOCK_UNLOCK_CMDS) ||                       \
      defined(ENABLE_UPDATE_PARTITIONS_CMDS))
 STATIC UINT8
@@ -3326,6 +3574,7 @@ FastbootCommandSetup (IN VOID *base, IN UINT32 size)
       {"oem device-info", CmdOemDevinfo},
       {"oem reboot-edl", CmdOemRebootEdl},
       {"oem reboot-recovery", CmdOemRebootRecovery},
+      {"oem test-sensor", CmdOemTestSensor},
       {"continue", CmdContinue},
       {"reboot", CmdReboot},
       {"reboot-bootloader", CmdRebootBootloader},
