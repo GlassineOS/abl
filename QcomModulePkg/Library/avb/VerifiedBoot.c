@@ -1274,6 +1274,22 @@ LoadImageAndAuth (BootInfo *Info)
       StrnCpyS (Info->Pname, ARRAY_SIZE (Info->Pname), L"boot",
                 StrLen (L"boot"));
     }
+  } else if (Info->BootIntoRecovery) {
+    /* NA1: This device keeps a dedicated, *unsuffixed* `recovery`
+     * partition (TWRP, the escape route when Android fails).  Stock A/B
+     * has no recovery partition (recovery rides inside boot.img), so the
+     * stock MultiSlotBoot path ignores BootIntoRecovery and always loads
+     * boot_<slot>.  On our A/B GPT that would boot the slot's Android
+     * instead of TWRP and we would lose the recovery
+     * escape route.  Load the unsuffixed `recovery` partition directly and
+     * deliberately bypass FindBootableSlot: recovery must come up even when
+     * the active slot is marked unbootable (that is precisely when the user
+     * needs recovery), and a recovery boot must not consume the slot's boot
+     * retry budget. */
+    DEBUG ((EFI_D_INFO, "NA1: MultiSlot recovery boot — loading unsuffixed "
+                        "recovery partition\n"));
+    GUARD (StrnCpyS (Info->Pname, ARRAY_SIZE (Info->Pname), L"recovery",
+                     StrLen (L"recovery")));
   } else {
     Slot CurrentSlot = {{0}};
 

@@ -500,17 +500,33 @@ BootLinux (BootInfo *Info)
     }
   }
 
+  /* NA1: select the loaded image by name.
+   *
+   * Stock A/B has no recovery partition (recovery rides in boot.img), so the
+   * stock selector only asks for "recovery" on a single-slot device and always
+   * asks for "boot" on MultiSlot.  But the NA1 change in LoadImageAndAuth
+   * (VerifiedBoot.c MultiSlot recovery branch) deliberately loads the
+   * *unsuffixed* `recovery` partition even on an A/B GPT, storing it in
+   * Info->Images[] under the name "recovery".  With the stock selector, a
+   * MultiSlot recovery boot would ask GetImage for "boot", fail to find it
+   * (the only loaded image is named "recovery"), return EFI_NOT_STARTED, and
+   * drop to fastboot, so recovery never boots on an A/B GPT.
+   *
+   * Fix: key the name purely on Recovery so it matches whatever
+   * LoadImageAndAuth loaded.  This changes ONLY the MultiSlot+recovery case;
+   * the three working paths are byte-identical:
+   *   single-slot normal  : "boot"     (matches "boot")
+   *   single-slot recovery : "recovery" (matches "recovery")
+   *   MultiSlot normal     : "boot"     (StrnCmp len 4 matches "boot_a") */
   Status = GetImage (Info,
                      &BootParamlistPtr.ImageBuffer,
                      (UINTN *)&BootParamlistPtr.ImageSize,
-                     (!Info->MultiSlotBoot &&
-                      Recovery)? "recovery" : "boot");
+                     Recovery? "recovery" : "boot");
   if (Status != EFI_SUCCESS ||
       BootParamlistPtr.ImageBuffer == NULL ||
       BootParamlistPtr.ImageSize <= 0) {
     DEBUG ((EFI_D_ERROR, "BootLinux: Get%aImage failed!\n",
-            (!Info->MultiSlotBoot &&
-             Recovery)? "Recovery" : "Boot"));
+            Recovery? "Recovery" : "Boot"));
     return EFI_NOT_STARTED;
   }
   /* Find if MDTP is enabled and Active */
