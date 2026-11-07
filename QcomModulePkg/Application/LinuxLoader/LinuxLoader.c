@@ -317,6 +317,154 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
       goto fastboot;
     }
 
+    /* NA1: Set Root of Trust via AVB_1 protocol (VBSendRot).
+     *
+     * With VERIFIED_BOOT=0 (NO_AVB), LoadImageAndAuth skips the AVB path
+     * entirely. The FDE encryption key is bound to the RoT that the stock
+     * ABL (AVB_1) set via VBSendRot. We must use the same protocol — NOT
+     * KeyMasterSetRotAndBootState (AVB_2 API) which produces a different
+     * RoT digest and causes FDE key mismatch.
+     *
+     * Flow: LocateProtocol → VBDeviceInit (unlocked) → VBVerifyImage
+     *       (sets BootState=ORANGE on unlocked device) → VBSendRot. */
+    {
+      QCOM_VERIFIEDBOOT_PROTOCOL *VbIntf = NULL;
+      device_info_vb_t DevInfo_vb;
+      CHAR8 PnameAscii[MAX_GPT_NAME_SIZE];
+      CHAR8 StrPname[MAX_GPT_NAME_SIZE];
+
+      Status = gBS->LocateProtocol (&gEfiQcomVerifiedBootProtocolGuid, NULL,
+                                    (VOID **)&VbIntf);
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "NA1: Cannot locate VB protocol: %r\n", Status));
+        goto na1_vb_done;
+      }
+
+      DevInfo_vb.is_unlocked = IsUnlocked ();
+      DevInfo_vb.is_unlock_critical = IsUnlockCritical ();
+      Status = VbIntf->VBDeviceInit (VbIntf, &DevInfo_vb);
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "NA1: VBDeviceInit failed: %r\n", Status));
+        goto na1_vb_done;
+      }
+
+      /* Build partition name and select image data for VBVerifyImage.
+       *
+       * VBSendRot sends a RoT digest that TZ uses to seal/unseal the ICE
+       * DKMK (Disk Key Master Key).  The digest is derived from the image
+       * data passed to VBVerifyImage.  If we pass recovery.img data during
+       * a recovery boot, TZ records a different RoT than the one used when
+       * Android sealed the DKMK → set_hw_device_encryption_key returns -7.
+       *
+       * Fix: when booting recovery, load boot.img so VBVerifyImage sees
+       * the same image data as during a normal Android boot → same RoT →
+       * TZ can unseal the DKMK.
+       *
+       * Boot partition is 64 MB on NA1.  Allocate a fixed 64 MB buffer,
+       * read boot.img, pass it to VBVerifyImage, free after VBSendRot.
+       * On any failure, fall back to recovery.img data — TWRP still boots
+       * even if FDE decrypt fails. */
+      VOID  *VbImgBuf  = Info.Images[0].ImageBuffer;
+      UINT32 VbImgSize = Info.Images[0].ImageSize;
+      VOID  *BootBuf   = NULL;
+
+      if (BootIntoRecovery) {
+        STATIC CONST UINT32 BootPartSz = 64 * 1024 * 1024; /* 64 MB */
+        UINT32 BootSz = BootPartSz;
+        CHAR16 BootPname[MAX_GPT_NAME_SIZE];
+        CHAR8  BootRotName[MAX_GPT_NAME_SIZE];
+
+        /* NA1: select boot_<activeslot> on an A/B GPT, plain "boot" on a
+         * single-slot GPT.  The RoT digest TZ records from this image must
+         * match the boot image of the slot Android sealed the DKMK under, or
+         * set_hw_device_encryption_key returns -7 (FDE will not decrypt).  On
+         * an A/B GPT there is no unsuffixed `boot` partition, so loading
+         * L"boot" would fail → recovery.img fallback → wrong RoT → the
+         * FDE data cannot be read from recovery.  The partition-name string
+         * (BootRotName) is kept in lock-step so it matches what a normal boot
+         * of the active slot passes to VBVerifyImage. */
+        StrnCpyS (BootPname, ARRAY_SIZE (BootPname), L"boot", StrLen (L"boot"));
+        AsciiStrnCpyS (BootRotName, ARRAY_SIZE (BootRotName), "/boot",
+                       AsciiStrLen ("/boot"));
+        if (MultiSlotBoot) {
+          Slot CurSlot = GetCurrentSlotSuffix ();
+          CHAR8 SuffixAscii[MAX_SLOT_SUFFIX_SZ] = {0};
+
+          StrnCatS (BootPname, ARRAY_SIZE (BootPname), CurSlot.Suffix,
+                    StrLen (CurSlot.Suffix));
+          UnicodeStrToAsciiStr (CurSlot.Suffix, SuffixAscii);
+          AsciiStrnCatS (BootRotName, ARRAY_SIZE (BootRotName), SuffixAscii,
+                         AsciiStrLen (SuffixAscii));
+        }
+
+        BootBuf = AllocatePages (ALIGN_PAGES (BootPartSz, ALIGNMENT_MASK_4KB));
+        if (BootBuf) {
+          EFI_STATUS Rs = LoadImageFromPartition (BootBuf, &BootSz, BootPname);
+          if (Rs == EFI_SUCCESS) {
+            VbImgBuf  = BootBuf;
+            VbImgSize = BootSz;
+            AsciiStrnCpyS (StrPname, ARRAY_SIZE (StrPname), BootRotName,
+                           AsciiStrLen (BootRotName));
+            DEBUG ((EFI_D_INFO,
+                    "NA1: recovery boot — loaded %s for RoT (%u bytes)\n",
+                    BootPname, BootSz));
+          } else {
+            /* Fall back: use recovery.img, FDE decrypt will likely fail. */
+            FreePages (BootBuf,
+                       ALIGN_PAGES (BootPartSz, ALIGNMENT_MASK_4KB));
+            BootBuf = NULL;
+            DEBUG ((EFI_D_WARN,
+                    "NA1: boot load for RoT failed %r — using recovery, "
+                    "FDE may not decrypt\n", Rs));
+            AsciiStrnCpyS (StrPname, ARRAY_SIZE (StrPname), "/recovery",
+                           AsciiStrLen ("/recovery"));
+          }
+        } else {
+          DEBUG ((EFI_D_WARN,
+                  "NA1: no memory for boot RoT buf — FDE may not decrypt\n"));
+          AsciiStrnCpyS (StrPname, ARRAY_SIZE (StrPname), "/recovery",
+                         AsciiStrLen ("/recovery"));
+        }
+      } else {
+        /* Normal boot: Info.Pname = L"boot", produce "/boot". */
+        AsciiStrnCpyS (StrPname, ARRAY_SIZE (StrPname), "/",
+                       AsciiStrLen ("/"));
+        UnicodeStrToAsciiStr (Info.Pname, PnameAscii);
+        AsciiStrnCatS (StrPname, ARRAY_SIZE (StrPname), PnameAscii,
+                       AsciiStrLen (PnameAscii));
+      }
+
+      Status = VbIntf->VBVerifyImage (VbIntf, (UINT8 *)StrPname,
+                                      (UINT8 *)VbImgBuf, VbImgSize,
+                                      &Info.BootState);
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "NA1: VBVerifyImage failed: %r (unlocked, "
+                "continuing as ORANGE)\n", Status));
+        Info.BootState = ORANGE;
+        /* On unlocked device, verification failure is expected with
+         * a patched boot image. Continue — VBSendRot just needs
+         * DeviceInit state, not verification success. */
+      }
+
+      Status = VbIntf->VBSendRot (VbIntf);
+      if (BootBuf) {
+        FreePages (BootBuf, ALIGN_PAGES (64 * 1024 * 1024, ALIGNMENT_MASK_4KB));
+        BootBuf = NULL;
+      }
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "NA1: VBSendRot failed: %r\n", Status));
+      } else {
+        DEBUG ((EFI_D_INFO, "NA1: VBSendRot success, BootState=%d\n",
+                Info.BootState));
+      }
+
+na1_vb_done:
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "NA1: VB RoT setup failed — FDE may not "
+                "decrypt. Continuing to boot.\n"));
+      }
+    }
+
     BootLinux (&Info);
   }
 
