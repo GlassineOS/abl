@@ -1,0 +1,102 @@
+# Files of the upstream import (Qualcomm's edk2 tree at LA.UM.7.2.c25-12600-sdm660.0)
+# that the organization's scan flags. Reviewed 2026-11-07: all of them are upstream's,
+# public in that tree, and none is GlassineOS content. Listed one by one, so a new file
+# in these folders is still scanned.
+
+# Prebuilt UEFI Shell binaries from upstream EDK II. They carry their builders' home
+# paths; they aren't built into the ABL.
+allow-path EdkShellBinPkg/Bin/Arm/Attrib.efi
+allow-path EdkShellBinPkg/Bin/Arm/Cls.efi
+allow-path EdkShellBinPkg/Bin/Arm/Comp.efi
+allow-path EdkShellBinPkg/Bin/Arm/Cp.efi
+allow-path EdkShellBinPkg/Bin/Arm/Date.efi
+allow-path EdkShellBinPkg/Bin/Arm/Dblk.efi
+allow-path EdkShellBinPkg/Bin/Arm/Devices.efi
+allow-path EdkShellBinPkg/Bin/Arm/Devtree.efi
+allow-path EdkShellBinPkg/Bin/Arm/Dmem.efi
+allow-path EdkShellBinPkg/Bin/Arm/DmpStore.efi
+allow-path EdkShellBinPkg/Bin/Arm/Drivers.efi
+allow-path EdkShellBinPkg/Bin/Arm/DrvCfg.efi
+allow-path EdkShellBinPkg/Bin/Arm/DrvDiag.efi
+allow-path EdkShellBinPkg/Bin/Arm/Edit.efi
+allow-path EdkShellBinPkg/Bin/Arm/EfiCompress.efi
+allow-path EdkShellBinPkg/Bin/Arm/EfiDecompress.efi
+allow-path EdkShellBinPkg/Bin/Arm/Err.efi
+allow-path EdkShellBinPkg/Bin/Arm/Guid.efi
+allow-path EdkShellBinPkg/Bin/Arm/HexEdit.efi
+allow-path EdkShellBinPkg/Bin/Arm/IfConfig.efi
+allow-path EdkShellBinPkg/Bin/Arm/IpConfig.efi
+allow-path EdkShellBinPkg/Bin/Arm/Load.efi
+allow-path EdkShellBinPkg/Bin/Arm/LoadPciRom.efi
+allow-path EdkShellBinPkg/Bin/Arm/Ls.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mem.efi
+allow-path EdkShellBinPkg/Bin/Arm/MemMap.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mkdir.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mm.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mode.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mount.efi
+allow-path EdkShellBinPkg/Bin/Arm/Mv.efi
+allow-path EdkShellBinPkg/Bin/Arm/NShell.efi
+allow-path EdkShellBinPkg/Bin/Arm/OpenInfo.efi
+allow-path EdkShellBinPkg/Bin/Arm/Pci.efi
+allow-path EdkShellBinPkg/Bin/Arm/Ping.efi
+allow-path EdkShellBinPkg/Bin/Arm/Resets.efi
+allow-path EdkShellBinPkg/Bin/Arm/Rm.efi
+allow-path EdkShellBinPkg/Bin/Arm/SerMode.efi
+allow-path EdkShellBinPkg/Bin/Arm/SmbiosView.efi
+allow-path EdkShellBinPkg/Bin/Arm/Stall.efi
+allow-path EdkShellBinPkg/Bin/Arm/TelnetMgmt.efi
+allow-path EdkShellBinPkg/Bin/Arm/Time.efi
+allow-path EdkShellBinPkg/Bin/Arm/TimeZone.efi
+allow-path EdkShellBinPkg/Bin/Arm/Touch.efi
+allow-path EdkShellBinPkg/Bin/Arm/Type.efi
+allow-path EdkShellBinPkg/Bin/Arm/Unload.efi
+allow-path EdkShellBinPkg/Bin/Arm/Ver.efi
+allow-path EdkShellBinPkg/Bin/Arm/Vol.efi
+allow-path EdkShellBinPkg/MinimumShell/Arm/Shell.efi
+allow-path ShellBinPkg/MinUefiShell/AArch64/Shell.efi
+allow-path ShellBinPkg/MinUefiShell/Arm/Shell.efi
+allow-path ShellBinPkg/UefiShell/AArch64/Shell.efi
+allow-path ShellBinPkg/UefiShell/Arm/Shell.efi
+
+# Python 2.7's own test certificates, test keys and example paths, part of upstream's
+# AppPkg. Public test material, not a key of ours.
+allow-path AppPkg/Applications/Python/Python-2.7.2/Demo/pdist/rcvs
+allow-path AppPkg/Applications/Python/Python-2.7.2/Demo/pdist/rrcs
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/badcert.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/badkey.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/https_svn_python_org_root.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/keycert.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/sha256.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/ssl_cert.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/ssl_key.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/svn_python_org_https_cert.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/test_genericpath.py
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/test_ntpath.py
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/test_posixpath.py
+allow-path AppPkg/Applications/Python/Python-2.7.2/Lib/test/wrongcert.pem
+allow-path AppPkg/Applications/Python/Python-2.7.2/Modules/socketmodule.c
+allow-path AppPkg/Applications/Python/Python-2.7.2/Tools/gdb/libpython.py
+
+# EDK II's published test signing key pair for its Rsa2048Sha256Sign tool. Public;
+# the Note Air ABL isn't signed with it.
+allow-path BaseTools/Source/Python/Rsa2048Sha256Sign/TestSigningPrivateKey.pem
+allow-path BaseTools/Source/Python/Rsa2048Sha256Sign/TestSigningPublicKey.bin
+
+# Example home paths in upstream's EDK II manuals.
+allow-path BaseTools/UserManuals/Intel_UEFI_Packaging_Tool_Man_Page.rtf
+allow-path BaseTools/UserManuals/VolInfo_Utility_Man_Page.rtf
+
+# Board data of other platforms in upstream (Intel Valleyview, BeagleBoard). Not
+# built for the Note Air.
+allow-path BeagleBoardPkg/ConfigurationHeader.bin
+allow-path Vlv2TbltDevicePkg/FspAzaliaConfigData/AzaliaConfig.bin
+allow-path Vlv2TbltDevicePkg/Stitch/Gcc/NvStorageFtwSpare.bin
+allow-path Vlv2TbltDevicePkg/Stitch/Gcc/NvStorageFtwWorking.bin
+allow-path Vlv2TbltDevicePkg/Stitch/Gcc/NvStorageVariable.bin
+allow-path Vlv2TbltDevicePkg/Stitch/IFWIHeader/IFWI_HEADER.bin
+allow-path Vlv2TbltDevicePkg/Stitch/IFWIHeader/Vacant.bin
+
+# Example home paths in comments of upstream's C library (StdLib).
+allow-path StdLib/LibC/Time/Theory.txt
+allow-path StdLib/PosixLib/Glob/glob.c
