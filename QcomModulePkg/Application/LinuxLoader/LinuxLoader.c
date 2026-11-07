@@ -485,6 +485,33 @@ na1_vb_done:
       AsciiStrCpyS (Info.VBCmdLine, Info.VBCmdLineLen, NA1VBCmdLine);
       Info.VBCmdLineFilledLen = AsciiStrLen (NA1VBCmdLine);
 
+      /* NA1: make the dm-verity backing device track the active slot.
+       * The literal above names system_a (mmcblk0p10); on slot _b the backing
+       * is system_b (mmcblk0p50).  Look up the current slot's system index and
+       * patch the two digits in place.  Both system_a (10) and system_b (50)
+       * are two-digit indices, so this is byte-for-byte size-neutral in the
+       * cmdline buffer and needs no PrintLib.  Without this BOTH slots booted
+       * system_a (p10), so a restore to the inactive slot's system was never
+       * read. */
+      if (MultiSlotBoot) {
+        Slot   CurSlot = GetCurrentSlotSuffix ();
+        CHAR16 SysPname[MAX_GPT_NAME_SIZE];
+        INT32  Idx;
+
+        StrnCpyS (SysPname, ARRAY_SIZE (SysPname), L"system",
+                  StrLen (L"system"));
+        StrnCatS (SysPname, ARRAY_SIZE (SysPname), CurSlot.Suffix,
+                  StrLen (CurSlot.Suffix));
+        Idx = GetPartitionIndex (SysPname);
+        if (Idx >= 10 && Idx < 100) {
+          CHAR8 *P = AsciiStrStr (Info.VBCmdLine, "mmcblk0p10");
+          if (P != NULL) {
+            P[8] = (CHAR8)('0' + (Idx / 10));
+            P[9] = (CHAR8)('0' + (Idx % 10));
+          }
+        }
+      }
+
       DEBUG ((EFI_D_INFO, "NA1: VBCmdLine overridden, len=%d\n",
               Info.VBCmdLineFilledLen));
     }
