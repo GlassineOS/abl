@@ -41,6 +41,8 @@
 
 [LibraryClasses]
 	DxeServicesTableLib
+	IoLib
+	TimerLib
 	UefiLib
 	UefiApplicationEntryPoint
 	CacheMaintenanceLib
@@ -54,7 +56,6 @@
 	DebugPrintErrorLevelLib
 	FdtLib
 	LibUfdt
-	TimerLib
 	BootLib
 	StackCanary
 	EfiFileLib

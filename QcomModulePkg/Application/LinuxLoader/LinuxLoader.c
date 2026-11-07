@@ -42,10 +42,19 @@
 #include <Library/PartitionTableUpdate.h>
 #include <Library/ShutdownServices.h>
 #include <Library/StackCanary.h>
+#include <Library/IoLib.h>
+#include <Library/TimerLib.h>
+#include <Library/DxeServicesTableLib.h>
 
 #define MAX_APP_STR_LEN 64
 #define MAX_NUM_FS 10
 #define DEFAULT_STACK_CHK_GUARD 0xc0c0c0c0
+
+/* NA1: Hall sensor GPIO 105 — south tile address.
+ * Flat range (0x03069xxx) is XPU-blocked from ABL; south tile works.
+ * Measured with `fastboot oem test-sensor`: south reads, flat hangs. */
+#define NA1_HALL_GPIO105_PAGE  0x03169000ULL
+#define NA1_HALL_GPIO_INOUT    0x03169004
 
 STATIC BOOLEAN BootReasonAlarm = FALSE;
 STATIC BOOLEAN BootIntoFastboot = FALSE;
@@ -200,6 +209,38 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   } else if (Status == EFI_DEVICE_ERROR) {
     DEBUG ((EFI_D_ERROR, "Error reading key status: %r\n", Status));
     goto stack_guard_update_default;
+  }
+
+  /* NA1: Hall sensor — magnetic cover as fastboot trigger.
+   * Close the cover during power-on → hold 3s → enters fastboot mode.
+   * Replaces vol-up key (device has no volume buttons).
+   * Uses south tile address — flat range is XPU-blocked in ABL. */
+  if (!BootIntoFastboot && !BootIntoRecovery) {
+    EFI_GCD_MEMORY_SPACE_DESCRIPTOR Na1GcdDesc;
+
+    /* Ensure TLMM page is GCD-mapped */
+    if (EFI_ERROR (gDS->GetMemorySpaceDescriptor (
+          NA1_HALL_GPIO105_PAGE, &Na1GcdDesc)) ||
+        Na1GcdDesc.GcdMemoryType == EfiGcdMemoryTypeNonExistent) {
+      gDS->AddMemorySpace (EfiGcdMemoryTypeMemoryMappedIo,
+                           NA1_HALL_GPIO105_PAGE, 0x1000, 0);
+      gDS->SetMemorySpaceAttributes (
+        NA1_HALL_GPIO105_PAGE, 0x1000, EFI_MEMORY_UC);
+    }
+
+    {
+      UINT32 HallVal = MmioRead32 (NA1_HALL_GPIO_INOUT);
+      if (!(HallVal & 0x1)) {
+        /* Cover closed — wait 3s and re-check (debounce) */
+        DEBUG ((EFI_D_INFO, "NA1: Cover closed at boot, confirming (3s)...\n"));
+        MicroSecondDelay (3000000);
+        HallVal = MmioRead32 (NA1_HALL_GPIO_INOUT);
+        if (!(HallVal & 0x1)) {
+          DEBUG ((EFI_D_INFO, "NA1: Cover confirmed — entering fastboot\n"));
+          BootIntoFastboot = TRUE;
+        }
+      }
+    }
   }
 
   // check for reboot mode
