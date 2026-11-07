@@ -136,6 +136,9 @@
   gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x2f
   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x80000042
   gEfiMdePkgTokenSpaceGuid.PcdReportStatusCodePropertyMask|0x06
+  # NA1: Disable display menu — e-ink EPDC hangs in UEFI context,
+  # blocking the fastboot USB event loop and preventing enumeration.
+  gQcomTokenSpaceGuid.EnableDisplayMenu|FALSE
 
 ################################################################################
 #
