@@ -2373,6 +2373,32 @@ CmdRebootBootloader (CONST CHAR8 *arg, VOID *data, UINT32 sz)
   FastbootFail ("Failed to reboot");
 }
 
+/* NA1: EDL escape hatch — reboot to Qualcomm Emergency Download (9008).
+ * Allows recovery via EDL without battery drain or hardware EDL cable. */
+STATIC VOID
+CmdOemRebootEdl (CONST CHAR8 *arg, VOID *data, UINT32 sz)
+{
+  DEBUG ((EFI_D_INFO, "Rebooting the device into EDL mode\n"));
+  FastbootOkay ("");
+  RebootDevice (EMERGENCY_DLOAD);
+
+  // Shouldn't get here
+  FastbootFail ("Failed to reboot to EDL");
+}
+
+/* NA1: Reboot to recovery (TWRP) from fastboot.
+ * Software path to TWRP — complements the hall sensor trigger. */
+STATIC VOID
+CmdOemRebootRecovery (CONST CHAR8 *arg, VOID *data, UINT32 sz)
+{
+  DEBUG ((EFI_D_INFO, "Rebooting the device into recovery mode\n"));
+  FastbootOkay ("");
+  RebootDevice (RECOVERY_MODE);
+
+  // Shouldn't get here
+  FastbootFail ("Failed to reboot to recovery");
+}
+
 #if (defined(ENABLE_DEVICE_CRITICAL_LOCK_UNLOCK_CMDS) ||                       \
      defined(ENABLE_UPDATE_PARTITIONS_CMDS))
 STATIC UINT8
@@ -3298,6 +3324,8 @@ FastbootCommandSetup (IN VOID *base, IN UINT32 size)
       {"oem off-mode-charge", CmdOemOffModeCharger},
       {"oem select-display-panel", CmdOemSelectDisplayPanel},
       {"oem device-info", CmdOemDevinfo},
+      {"oem reboot-edl", CmdOemRebootEdl},
+      {"oem reboot-recovery", CmdOemRebootRecovery},
       {"continue", CmdContinue},
       {"reboot", CmdReboot},
       {"reboot-bootloader", CmdRebootBootloader},
