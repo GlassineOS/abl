@@ -125,6 +125,12 @@ build:
 | `FVMAIN` (uncompressed, holds `LinuxLoader.efi`) | 311,488 | 311,472 | 16 | its contents: `NumBlocks = 0` in `QcomModulePkg/QcomModulePkg.fdf` |
 | `FVMAIN_COMPACT` (compressed `FVMAIN`, the image in `abl.elf`) | 139,264 | 89,800 | 49,464 | `BlockSize` × `NumBlocks` of the flash device in the same file |
 
+The `glassine/handback` branch (the loader hand-back, not flashed) at `acfba65`, with
+the flashed build's stamps: `FVMAIN` 315,584 / 315,568 / 16, `FVMAIN_COMPACT` 139,264 /
+91,400 / 47,864 (1,600 bytes more than the flashed build); `abl.elf` sha256
+`7899b27fde8c6fc1e7936daf9f7491fe46af7477cdc777a2578febdf90bc29fb`, the same in two
+builds. `glassine/test-handback` runs the answer and header checks on the host.
+
 `FVMAIN` is sized to fit what it holds, so its 16 free bytes are alignment padding, not
 a limit. A build with 8 KiB of data added to `LinuxLoader` gave an `FVMAIN` of 319,680
 bytes, again with 16 free, and built and signed without an error. The limit that applies is `FVMAIN_COMPACT`'s: about
