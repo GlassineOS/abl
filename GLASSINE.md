@@ -125,10 +125,10 @@ build:
 | `FVMAIN` (uncompressed, holds `LinuxLoader.efi`) | 311,488 | 311,472 | 16 | its contents: `NumBlocks = 0` in `QcomModulePkg/QcomModulePkg.fdf` |
 | `FVMAIN_COMPACT` (compressed `FVMAIN`, the image in `abl.elf`) | 139,264 | 89,800 | 49,464 | `BlockSize` × `NumBlocks` of the flash device in the same file |
 
-The `glassine/handback` branch (the loader hand-back, not flashed) at `5a601f2`, with
+The `glassine/handback` branch (the loader hand-back, not flashed) at `b4a896c`, with
 the flashed build's stamps: `FVMAIN` 315,584 / 315,568 / 16, `FVMAIN_COMPACT` 139,264 /
-92,032 / 47,232 (2,232 bytes more than the flashed build); `abl.elf` sha256
-`13d08d090d417387c67f0242d5fd4eab7d10895994feb3b776ccc7293283a2b2`, the same in two
+92,048 / 47,216 (2,248 bytes more than the flashed build); `abl.elf` sha256
+`ec947085ee2d0ee4107b693d928e0e2529c16000de31eddb6fed1f5e6e554cb0`, the same in two
 builds. `glassine/test-handback` runs the region table, header and answer checks on the
 host.
 
