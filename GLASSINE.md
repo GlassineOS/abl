@@ -125,7 +125,8 @@ build:
 | `FVMAIN` (uncompressed, holds `LinuxLoader.efi`) | 311,488 | 311,472 | 16 | its contents: `NumBlocks = 0` in `QcomModulePkg/QcomModulePkg.fdf` |
 | `FVMAIN_COMPACT` (compressed `FVMAIN`, the image in `abl.elf`) | 139,264 | 89,800 | 49,464 | `BlockSize` × `NumBlocks` of the flash device in the same file |
 
-The `glassine/handback` branch (the loader hand-back, not flashed) at `b4a896c`, with
+The `glassine/handback` branch (the loader hand-back, not flashed) at `b4a896c` (and
+`bb8ec3b`, a comment only: the same bytes), with
 the flashed build's stamps: `FVMAIN` 315,584 / 315,568 / 16, `FVMAIN_COMPACT` 139,264 /
 92,048 / 47,216 (2,248 bytes more than the flashed build); `abl.elf` sha256
 `ec947085ee2d0ee4107b693d928e0e2529c16000de31eddb6fed1f5e6e554cb0`, the same in two
