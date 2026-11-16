@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Host test of the hand-back checks (QcomModulePkg/Application/LinuxLoader/
+# HandbackParse.c) against the cases of GlassineOS/boot docs/handback.md.
+# Needs a C compiler (cc), nothing else.
+set -euo pipefail
+REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+OUT="$(mktemp -d)"
+trap 'rm -rf "$OUT"' EXIT
+cc -std=c99 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -DGLASSINE_HOST_TEST \
+    -I "$REPO/glassine/test" -I "$REPO/QcomModulePkg/Application/LinuxLoader" \
+    "$REPO/QcomModulePkg/Application/LinuxLoader/HandbackParse.c" \
+    "$REPO/glassine/test/handback-test.c" -o "$OUT/handback-test"
+"$OUT/handback-test"
