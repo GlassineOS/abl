@@ -33,6 +33,7 @@
 #include "AutoGen.h"
 #include "BootLinux.h"
 #include "BootStats.h"
+#include "Handback.h"
 #include "KeyPad.h"
 #include "LinuxLoaderLib.h"
 #include <FastbootLib/FastbootMain.h>
@@ -304,6 +305,18 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Error finding board information: %r\n", Status));
     return Status;
+  }
+
+  /* GlassineOS hand-back (GlassineOS/boot specs/012-handback): on slot B
+   * only, after every way into fastboot or the recovery above, start the
+   * GlassineOS loader and let it ask for the recovery. Every other outcome,
+   * failures included, leaves BootIntoRecovery as it is: boot_b. */
+  if (MultiSlotBoot && !BootIntoFastboot && !BootIntoRecovery) {
+    Slot HbSlot = GetCurrentSlotSuffix ();
+
+    if (HbSlot.Suffix[0] == L'_' && HbSlot.Suffix[1] == L'b' &&
+        HbSlot.Suffix[2] == L'\0' && HandbackAsksRecovery (ImageHandle))
+      BootIntoRecovery = TRUE;
   }
 
   if (!BootIntoFastboot) {

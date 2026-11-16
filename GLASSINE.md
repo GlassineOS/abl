@@ -44,6 +44,7 @@ One commit per change, in this order:
 | LinuxLoader: give Android the stock dm-verity command line | what Android's init expects |
 | BootLib, avb: boot the recovery partition on an A/B table | stock A/B bootloaders only boot `boot_<slot>` |
 | LinuxLoader: point the verity device at the active slot's system | stock hard-wires slot A's system partition |
+| LinuxLoader: start the GlassineOS loader on slot B (branch `glassine/handback`, not flashed) | the loader counts starts and can ask for the recovery; any failure boots `boot_b` as before |
 
 Each commit message says how the change can fail and the way back. Only the tag is
 build-tested: the commits before it were split by hand and haven't been built one by
