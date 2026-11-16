@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
  * GlassineOS hand-back: this bootloader as the parent of the GlassineOS loader
- * (GlassineOS/boot specs/012-handback, docs/handback.md, format 1).
+ * (GlassineOS/boot specs/012-device-boot-partition, docs/handback.md,
+ * docs/boot-partition.md "The raw form", format 1).
  *
  * HandbackParse.c holds the checks of what is read from disk and from the
  * loader's exit data. It uses no library function and no firmware service, so
