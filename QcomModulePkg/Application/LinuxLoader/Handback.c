@@ -20,6 +20,7 @@
  */
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
+#include <Library/DevicePathLib.h>
 #include <Library/LinuxLoaderLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
@@ -153,8 +154,11 @@ HandbackAsksRecovery (EFI_HANDLE ParentImage)
     goto out;
   }
 
-  Status = gBS->LoadImage (FALSE, ParentImage, NULL, Image, (UINTN)ImageSize,
-                           &Child);
+  /* With the partition's device path: an EDK2 with image verification refuses
+   * a buffer with none (docs/handback.md, step 2). Nothing is read through it. */
+  Status = gBS->LoadImage (FALSE, ParentImage,
+                           DevicePathFromHandle (Info[0].Handle), Image,
+                           (UINTN)ImageSize, &Child);
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "glassine: LoadImage: %r: boot_b\n", Status));
     if (Child != NULL)
