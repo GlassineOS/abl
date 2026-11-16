@@ -50,6 +50,27 @@ static HB_BOOT Parse (CONST char *Text, char Id[17])
   return HandbackParse (D, N, Crc32, Id);
 }
 
+/* A region table as the installer writes it; Regions: Count of {name, offset, size}. */
+static void Table (UINT8 *T, UINT64 Part, CONST void *Regions, UINT32 Count)
+{
+  CONST struct { CONST char *Name; UINT64 Off, Size; } *R = Regions;
+  memset (T, 0, 4096);
+  memcpy (T, "GLREGION", 8);
+  T[8] = 1;
+  for (int I = 0; I < 4; I++) T[12 + I] = (UINT8)(Count >> (8 * I));
+  for (int I = 0; I < 8; I++) T[16 + I] = (UINT8)(Part >> (8 * I));
+  for (UINT32 N = 0; N < Count; N++) {
+    UINT8 *E = T + 64 + 64 * N;
+    memcpy (E, R[N].Name, strlen (R[N].Name));
+    for (int I = 0; I < 8; I++) E[32 + I] = (UINT8)(R[N].Off >> (8 * I));
+    for (int I = 0; I < 8; I++) E[40 + I] = (UINT8)(R[N].Size >> (8 * I));
+    UINT32 C = Crc32 (E, 52);
+    for (int I = 0; I < 4; I++) E[52 + I] = (UINT8)(C >> (8 * I));
+  }
+  UINT32 C = Crc32 (T, 4092);
+  for (int I = 0; I < 4; I++) T[4092 + I] = (UINT8)(C >> (8 * I));
+}
+
 int main (void)
 {
   char Id[17];
@@ -145,7 +166,7 @@ int main (void)
     UINT8 H[4096] = {0};
     UINT64 Size;
     UINT32 Crc;
-    UINT64 Part = 8ull << 20;
+    UINT64 Part = 3ull << 20; /* the loader region's size */
     UINT32 Img = 0x12345678u;
     memcpy (H, "GLLOADER", 8);
     H[8] = 1;
@@ -161,8 +182,8 @@ int main (void)
       B[I] ^= 0x10;
       CHECK (!HandbackCheckHeader (B, Part, Crc32, &Size, &Crc), "header byte %d", I);
     }
-    CHECK (!HandbackCheckHeader (H, (1ull << 20) + 4096 + S - 1, Crc32, &Size, &Crc), "past the partition");
-    CHECK (!HandbackCheckHeader (H, 1000, Crc32, &Size, &Crc), "a partition smaller than the offset");
+    CHECK (!HandbackCheckHeader (H, 4096 + S - 1, Crc32, &Size, &Crc), "past the region");
+    CHECK (!HandbackCheckHeader (H, 1000, Crc32, &Size, &Crc), "a region smaller than the header");
     UINT8 Z[4096] = {0};
     CHECK (!HandbackCheckHeader (Z, Part, Crc32, &Size, &Crc), "zeros");
     /* Too large, with a good CRC. */
@@ -171,6 +192,44 @@ int main (void)
     Hc = Crc32 (H, 28);
     for (int I = 0; I < 4; I++) H[28 + I] = (UINT8)(Hc >> (8 * I));
     CHECK (!HandbackCheckHeader (H, 64ull << 20, Crc32, &Size, &Crc), "too large");
+  }
+
+  /* The region table (docs/boot-partition.md, "The region table"). */
+  {
+    static UINT8 T[4096], B[4096];
+    UINT64 Off, Sz, Part = 16ull << 20;
+    struct { CONST char *Name; UINT64 Off, Size; } L[] = {
+      {"record", 64 << 10, 32 << 10}, {"probe", 128 << 10, 64 << 10}, {"loader", 1 << 20, 3 << 20},
+      {"splash-default", 4 << 20, 3 << 20}, {"splash", 7 << 20, 3 << 20}, {"override", 10 << 20, 3 << 20},
+    };
+    Table (T, Part, (CONST void *)L, 6);
+    /* The table GlassineOS/loader core/src/raw/tests.rs checks too
+     * (SHARED_TABLE_CRC): the CRC of the 16 MiB layout's 4096 bytes. */
+    CHECK (Crc32 (T, 4096) == 0x2144df1cu, "shared table: crc %08x", Crc32 (T, 4096));
+    CHECK (HandbackFindLoader (T, Part, Crc32, &Off, &Sz) && Off == (1 << 20) && Sz == (3 << 20), "the loader region");
+    CHECK (!HandbackFindLoader (T, Part - 4096, Crc32, &Off, &Sz), "another partition's size");
+    for (int I = 0; I < 4096; I++) {
+      memcpy (B, T, 4096);
+      B[I] ^= 0x01;
+      CHECK (!HandbackFindLoader (B, Part, Crc32, &Off, &Sz), "table byte %d", I);
+    }
+    struct { CONST char *Name; UINT64 Off, Size; } Bad[][2] = {
+      {{"loader", 1 << 20, 3 << 20}, {"record", (2 << 20), 4096}},   /* overlap */
+      {{"loader", 1 << 20, 3 << 20}, {"loader", 8 << 20, 4096}},     /* twice */
+      {{"Loader", 1 << 20, 3 << 20}, {"record", 64 << 10, 4096}},    /* capital */
+      {{"loader", (1 << 20) + 512, 3 << 20}, {"record", 64 << 10, 4096}},
+      {{"loader", 1 << 20, (3 << 20) + 512}, {"record", 64 << 10, 4096}},
+      {{"loader", 1 << 20, 0}, {"record", 64 << 10, 4096}},
+      {{"loader", 0, 3 << 20}, {"record", 8 << 20, 4096}},           /* over the primary */
+      {{"loader", (16 << 20) - (1 << 20), 1 << 20}, {"record", 64 << 10, 4096}}, /* into the backup */
+    };
+    for (UINTN I = 0; I < sizeof Bad / sizeof *Bad; I++) {
+      Table (T, Part, (CONST void *)Bad[I], 2);
+      CHECK (!HandbackFindLoader (T, Part, Crc32, &Off, &Sz), "bad table %zu", I);
+    }
+    struct { CONST char *Name; UINT64 Off, Size; } NoLoader[] = {{"record", 64 << 10, 32 << 10}};
+    Table (T, Part, (CONST void *)NoLoader, 1);
+    CHECK (!HandbackFindLoader (T, Part, Crc32, &Off, &Sz), "no loader region");
   }
 
   printf ("%s: %d failures\n", Fails ? "FAIL" : "ok", Fails);

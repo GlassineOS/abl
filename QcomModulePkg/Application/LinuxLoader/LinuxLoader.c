@@ -307,7 +307,7 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     return Status;
   }
 
-  /* GlassineOS hand-back (GlassineOS/boot specs/012-handback): on slot B
+  /* GlassineOS hand-back (GlassineOS/boot spec 012): on slot B
    * only, after every way into fastboot or the recovery above, start the
    * GlassineOS loader and let it ask for the recovery. Every other outcome,
    * failures included, leaves BootIntoRecovery as it is: boot_b. */

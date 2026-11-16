@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * GlassineOS hand-back: the checks of the loader image header and of the
- * loader's answer (GlassineOS/boot docs/handback.md, format 1).
+ * GlassineOS hand-back: the checks of the boot partition's region table, of
+ * the loader region's header and of the loader's answer (GlassineOS/boot
+ * docs/boot-partition.md "The raw form", docs/handback.md, format 1).
  *
  * Everything here reads bytes that came from disk or from another program, so
  * every length is bounded by the caller's size and nothing assumes a zero at
@@ -28,8 +29,109 @@ Le64 (CONST UINT8 *P)
   return (UINT64)Le32 (P) | ((UINT64)Le32 (P + 4) << 32);
 }
 
+STATIC BOOLEAN
+IsNameChar (UINT8 C)
+{
+  return (C >= 'a' && C <= 'z') || (C >= '0' && C <= '9') || C == '-';
+}
+
 BOOLEAN
-HandbackCheckHeader (CONST UINT8 *Header, UINT64 PartBytes, HB_CRC32 Crc,
+HandbackFindLoader (CONST UINT8 *Table, UINT64 PartBytes, HB_CRC32 Crc,
+                    UINT64 *Offset, UINT64 *Size)
+{
+  STATIC CONST UINT8 Magic[8] = {'G', 'L', 'R', 'E', 'G', 'I', 'O', 'N'};
+  STATIC CONST UINT8 Loader[7] = {'l', 'o', 'a', 'd', 'e', 'r', 0};
+  UINTN I;
+  UINTN J;
+  UINTN K;
+  UINTN Count;
+  UINT64 End;
+  BOOLEAN Found = FALSE;
+
+  for (I = 0; I < 8; I++) {
+    if (Table[I] != Magic[I])
+      return FALSE;
+  }
+  if (Crc (Table, 4092) != Le32 (Table + 4092))
+    return FALSE;
+  if (Le32 (Table + 8) != 1 || Le64 (Table + 16) != PartBytes ||
+      PartBytes < 2 * HB_TABLE_SIZE)
+    return FALSE;
+  Count = Le32 (Table + 12);
+  if (Count == 0 || Count > HB_TABLE_ENTRIES_MAX)
+    return FALSE;
+  for (I = 24; I < 64; I++) {
+    if (Table[I] != 0)
+      return FALSE;
+  }
+  for (I = 64 + 64 * Count; I < 4092; I++) {
+    if (Table[I] != 0)
+      return FALSE;
+  }
+  End = PartBytes - HB_TABLE_SIZE;
+  for (I = 0; I < Count; I++) {
+    CONST UINT8 *E = Table + 64 + 64 * I;
+    UINT64 Off = Le64 (E + 32);
+    UINT64 Sz = Le64 (E + 40);
+    UINTN Len = 0;
+
+    if (Crc (E, 52) != Le32 (E + 52))
+      return FALSE;
+    for (K = 56; K < 64; K++) {
+      if (E[K] != 0)
+        return FALSE;
+    }
+    while (Len < 32 && E[Len] != 0)
+      Len++;
+    if (Len == 0 || Len > 31)
+      return FALSE;
+    for (K = 0; K < Len; K++) {
+      if (!IsNameChar (E[K]))
+        return FALSE;
+    }
+    for (K = Len; K < 32; K++) {
+      if (E[K] != 0)
+        return FALSE;
+    }
+    if ((Off % 4096) != 0 || (Sz % 4096) != 0 || Sz == 0 ||
+        Off < HB_TABLE_SIZE || Off > End || Sz > End - Off)
+      return FALSE;
+    for (J = 0; J < I; J++) {
+      CONST UINT8 *F = Table + 64 + 64 * J;
+      UINT64 FOff = Le64 (F + 32);
+      UINT64 FSz = Le64 (F + 40);
+      BOOLEAN SameName = TRUE;
+
+      for (K = 0; K < 32; K++) {
+        if (E[K] != F[K]) {
+          SameName = FALSE;
+          break;
+        }
+      }
+      if (SameName || (Off < FOff + FSz && FOff < Off + Sz))
+        return FALSE;
+    }
+    /* "loader", with no flag set. */
+    if (Len == 6 && Le32 (E + 48) == 0) {
+      BOOLEAN IsLoader = TRUE;
+      for (K = 0; K < 7; K++) {
+        if (E[K] != Loader[K]) {
+          IsLoader = FALSE;
+          break;
+        }
+      }
+      if (IsLoader) {
+        *Offset = Off;
+        *Size = Sz;
+        Found = TRUE;
+      }
+    }
+  }
+  return Found;
+}
+
+BOOLEAN
+HandbackCheckHeader (CONST UINT8 *Header, UINT64 RegionBytes, HB_CRC32 Crc,
                      UINT64 *ImageSize, UINT32 *ImageCrc)
 {
   STATIC CONST UINT8 Magic[8] = {'G', 'L', 'L', 'O', 'A', 'D', 'E', 'R'};
@@ -45,8 +147,8 @@ HandbackCheckHeader (CONST UINT8 *Header, UINT64 PartBytes, HB_CRC32 Crc,
   if (Le32 (Header + 8) != 1 || Le32 (Header + 12) != 0)
     return FALSE;
   Size = Le64 (Header + 16);
-  if (Size == 0 || Size > HB_IMAGE_MAX || PartBytes < HB_IMAGE_OFFSET ||
-      Size > PartBytes - HB_IMAGE_OFFSET)
+  if (Size == 0 || Size > HB_IMAGE_MAX || RegionBytes < HB_HEADER_SIZE ||
+      Size > RegionBytes - HB_HEADER_SIZE)
     return FALSE;
   *ImageSize = Size;
   *ImageCrc = Le32 (Header + 24);

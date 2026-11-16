@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
  * GlassineOS hand-back: on the GlassineOS slot, start the GlassineOS loader
- * from the hand-back partition and act on its answer (GlassineOS/boot
- * specs/012-handback, docs/handback.md, format 1).
+ * from the boot partition and act on its answer (GlassineOS/boot
+ * specs/012-device-boot-partition, docs/handback.md, docs/boot-partition.md
+ * "The raw form", format 1). Only the raw form is read: the region table
+ * (primary, else backup), then the region "loader". A partition in the FAT
+ * form, or any doubt about the table, is the floor.
  *
  * The floor: every failure on the way returns FALSE, and the caller boots
  * boot_b exactly as without this code. No register is touched (no MMIO), no
@@ -26,9 +29,9 @@
 
 #include "Handback.h"
 
-/* The hand-back partition, found by its GPT name. On a table without it the
- * loader is never started. */
-STATIC CHAR16 HandbackPartName[] = L"glassine-handback";
+/* The boot partition, found by its GPT name. On a table without it the loader
+ * is never started. */
+STATIC CHAR16 HandbackPartName[] = L"glassine-boot";
 STATIC CHAR16 HandbackOptions[] = L"glassine.handback=1";
 
 #define HB_WATCHDOG_SECONDS 30
@@ -76,6 +79,10 @@ HandbackAsksRecovery (EFI_HANDLE ParentImage)
   UINT32 Count = 1;
   EFI_BLOCK_IO_PROTOCOL *BlkIo;
   UINT64 PartBytes;
+  VOID *Table = NULL;
+  UINTN TablePages = 0;
+  UINT64 RegionOff = 0;
+  UINT64 RegionSize = 0;
   VOID *Header = NULL;
   UINTN HeaderPages = 0;
   VOID *Image = NULL;
@@ -100,31 +107,46 @@ HandbackAsksRecovery (EFI_HANDLE ParentImage)
                             BLK_IO_SEL_MATCH_PARTITION_LABEL,
                             &Filter, Info, &Count);
   if (Status != EFI_SUCCESS || Count != 1) {
-    DEBUG ((EFI_D_INFO, "glassine: no hand-back partition (%r, %u): boot_b\n",
+    DEBUG ((EFI_D_INFO, "glassine: no boot partition (%r, %u): boot_b\n",
             Status, Count));
     return FALSE;
   }
   BlkIo = Info[0].BlkIo;
   if (BlkIo == NULL || BlkIo->Media == NULL || !BlkIo->Media->MediaPresent ||
       BlkIo->Media->BlockSize == 0 || (4096 % BlkIo->Media->BlockSize) != 0) {
-    DEBUG ((EFI_D_ERROR, "glassine: hand-back partition unusable: boot_b\n"));
+    DEBUG ((EFI_D_ERROR, "glassine: boot partition unusable: boot_b\n"));
     return FALSE;
   }
   PartBytes = (BlkIo->Media->LastBlock + 1) * (UINT64)BlkIo->Media->BlockSize;
-  if (PartBytes < HB_PART_MIN) {
-    DEBUG ((EFI_D_ERROR, "glassine: hand-back partition too small: boot_b\n"));
+  if (PartBytes < 2 * HB_TABLE_SIZE) {
+    DEBUG ((EFI_D_ERROR, "glassine: boot partition too small: boot_b\n"));
     return FALSE;
   }
 
-  Header = ReadAt (BlkIo, HB_HEADER_OFFSET, HB_HEADER_SIZE, &HeaderPages);
+  /* The region table: the primary, else the backup in the last 4096 bytes. */
+  Table = ReadAt (BlkIo, 0, HB_TABLE_SIZE, &TablePages);
+  if (Table == NULL || !HandbackFindLoader (Table, PartBytes, FwCrc32,
+                                            &RegionOff, &RegionSize)) {
+    if (Table != NULL)
+      gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Table, TablePages);
+    Table = ReadAt (BlkIo, PartBytes - HB_TABLE_SIZE, HB_TABLE_SIZE,
+                    &TablePages);
+    if (Table == NULL || !HandbackFindLoader (Table, PartBytes, FwCrc32,
+                                              &RegionOff, &RegionSize)) {
+      DEBUG ((EFI_D_INFO, "glassine: no region table with a loader on the "
+                          "boot partition: boot_b\n"));
+      goto out;
+    }
+  }
+
+  Header = ReadAt (BlkIo, RegionOff, HB_HEADER_SIZE, &HeaderPages);
   if (Header == NULL ||
-      !HandbackCheckHeader (Header, PartBytes, FwCrc32, &ImageSize,
+      !HandbackCheckHeader (Header, RegionSize, FwCrc32, &ImageSize,
                             &ImageCrc)) {
-    DEBUG ((EFI_D_INFO, "glassine: no loader on the hand-back partition: "
-                        "boot_b\n"));
+    DEBUG ((EFI_D_INFO, "glassine: no loader in the loader region: boot_b\n"));
     goto out;
   }
-  Image = ReadAt (BlkIo, HB_IMAGE_OFFSET, ImageSize, &ImagePages);
+  Image = ReadAt (BlkIo, RegionOff + HB_HEADER_SIZE, ImageSize, &ImagePages);
   if (Image == NULL || FwCrc32 (Image, (UINTN)ImageSize) != ImageCrc) {
     DEBUG ((EFI_D_ERROR, "glassine: loader unreadable or its CRC fails: "
                          "boot_b\n"));
@@ -183,5 +205,7 @@ out:
     gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Image, ImagePages);
   if (Header != NULL)
     gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Header, HeaderPages);
+  if (Table != NULL)
+    gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Table, TablePages);
   return Answer == HB_RECOVERY;
 }

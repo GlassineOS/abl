@@ -11,11 +11,13 @@
 #ifndef __GLASSINE_HANDBACK_H__
 #define __GLASSINE_HANDBACK_H__
 
-/* The hand-back partition (docs/handback.md, "The hand-back partition"). */
-#define HB_PART_MIN          (4ULL << 20)
-#define HB_HEADER_OFFSET     (1ULL << 20)
+/* The boot partition's raw form (docs/boot-partition.md, "The raw form"): the
+ * region table, at the start and in the last 4096 bytes. */
+#define HB_TABLE_SIZE        4096
+#define HB_TABLE_ENTRIES_MAX 62
+/* The region "loader" (docs/handback.md, "The loader region"): a 4096-byte
+ * header, then the image. */
 #define HB_HEADER_SIZE       4096
-#define HB_IMAGE_OFFSET      (HB_HEADER_OFFSET + HB_HEADER_SIZE)
 #define HB_IMAGE_MAX         ((3ULL << 20) - 4096)
 
 /* The exit data: the UCS-2 prefix "GLASSINE-HANDBACK" and its zero, then at
@@ -32,10 +34,19 @@ typedef enum {
 
 typedef UINT32 (*HB_CRC32) (CONST UINT8 *Data, UINTN Size);
 
-/* The image size and its CRC-32 from the 4096-byte loader image header, as
- * docs/handback.md, "The loader image header", says. FALSE: no loader. */
+/* The region "loader" from one copy of the region table, which must be valid
+ * as a whole for a partition of PartBytes bytes (magic, format, CRC, size, and
+ * every entry: its CRC, name, alignment, bounds, no overlap, no repeat). FALSE:
+ * this copy can't be used. */
 BOOLEAN
-HandbackCheckHeader (CONST UINT8 *Header, UINT64 PartBytes, HB_CRC32 Crc,
+HandbackFindLoader (CONST UINT8 *Table, UINT64 PartBytes, HB_CRC32 Crc,
+                    UINT64 *Offset, UINT64 *Size);
+
+/* The image size and its CRC-32 from the loader region's 4096-byte header, as
+ * docs/handback.md, "The loader region", says. RegionBytes: the region's size.
+ * FALSE: no loader. */
+BOOLEAN
+HandbackCheckHeader (CONST UINT8 *Header, UINT64 RegionBytes, HB_CRC32 Crc,
                      UINT64 *ImageSize, UINT32 *ImageCrc);
 
 /* What the exit data asks for ("What the parent does with it"). Anything but
