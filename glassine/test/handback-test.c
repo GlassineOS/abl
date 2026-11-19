@@ -80,14 +80,17 @@ int main (void)
   CHECK (Crc32 ((CONST UINT8 *)"123456789", 9) == 0xcbf43926u, "crc32 is not zlib's");
 
   /* The bytes GlassineOS/loader core/src/answer.rs checks too (tests::SHARED):
-   * what its Answer::text writes for a limit and for a requested set. */
+   * what its Answer::text writes for a limit, for a requested set and for the
+   * Android pick. */
   {
     static CONST char *Shared[] = {
       "format=1\nboot=recovery\nwhy=limit\ncrc32=a84aa7ed\n",
       "format=1\nboot=set:0123456789abcdef\nset_rec=\nwhy=request\ncrc32=1fee18ad\n",
+      "format=1\nboot=other:android\nwhy=choice\ncrc32=62dcfe05\n",
     };
     CHECK (Parse (Shared[0], Id) == HB_RECOVERY, "shared 0");
     CHECK (Parse (Shared[1], Id) == HB_SET && strcmp (Id, "0123456789abcdef") == 0, "shared 1");
+    CHECK (Parse (Shared[2], Id) == HB_ANDROID, "shared 2");
   }
   /* A key other than boot= twice: the contract lets a parent not check keys it
    * doesn't use; this one doesn't. */
@@ -134,7 +137,10 @@ int main (void)
   CHECK (Parse (WithCrc ("format=1\n"), Id) == HB_FLOOR, "only format");
   {
     CONST char *Bad[] = {"reboot", "set:", "set:0123", "set:0123456789ABCDEF", "set:0123456789abcdefg",
-                         "set:0123456789abcde", "Baseline", "", "recovery ", "baseline\t"};
+                         "set:0123456789abcde", "Baseline", "", "recovery ", "baseline\t",
+                         /* other: names only what HB_LOAD_OPTIONS announces */
+                         "other:", "other", "android", "other:Android", "other:android ", "other:androidx",
+                         "other:windows", "other:android,other:android"};
     for (UINTN I = 0; I < sizeof Bad / sizeof *Bad; I++) {
       char B[128];
       snprintf (B, sizeof B, "format=1\nboot=%s\n", Bad[I]);

@@ -7,14 +7,16 @@
  * (primary, else backup), then the region "loader". A partition in the FAT
  * form, or any doubt about the table, is the floor.
  *
- * The floor: every failure on the way returns FALSE, and the caller boots
+ * The floor: every failure on the way returns HB_FLOOR, and the caller boots
  * boot_b exactly as without this code. No register is touched (no MMIO), no
  * storage is written, nothing waits without an end except the loader itself,
  * which runs under a 30 s firmware watchdog.
  *
  * What the answer can do here: "recovery" sets the recovery boot (the
- * unsuffixed recovery partition, as a recovery request does). "baseline" and
- * every failure boot boot_b. "set:<id>" names a kernel set from the block-list
+ * unsuffixed recovery partition, as a recovery request does). "other:android"
+ * boots the Android slot (boot_a) at this start only; the caller does that
+ * without writing a slot attribute (LinuxLoader.c). "baseline" and every
+ * failure boot boot_b. "set:<id>" names a kernel set from the block-list
  * hand-off (GlassineOS/boot docs/blocklist.md); this build has no block-list
  * reader yet, so it is logged and boot_b boots. cmdline_add is ignored.
  */
@@ -33,7 +35,7 @@
 /* The boot partition, found by its GPT name. On a table without it the loader
  * is never started. */
 STATIC CHAR16 HandbackPartName[] = L"glassine-boot";
-STATIC CHAR16 HandbackOptions[] = L"glassine.handback=1";
+STATIC CHAR16 HandbackOptions[] = HB_LOAD_OPTIONS;
 
 #define HB_WATCHDOG_SECONDS 30
 
@@ -72,8 +74,8 @@ ReadAt (EFI_BLOCK_IO_PROTOCOL *BlkIo, UINT64 Offset, UINT64 Size,
   return Buf;
 }
 
-BOOLEAN
-HandbackAsksRecovery (EFI_HANDLE ParentImage)
+HB_BOOT
+HandbackAsk (EFI_HANDLE ParentImage)
 {
   PartiSelectFilter Filter;
   HandleInfo Info[1];
@@ -110,18 +112,18 @@ HandbackAsksRecovery (EFI_HANDLE ParentImage)
   if (Status != EFI_SUCCESS || Count != 1) {
     DEBUG ((EFI_D_INFO, "glassine: no boot partition (%r, %u): boot_b\n",
             Status, Count));
-    return FALSE;
+    return HB_FLOOR;
   }
   BlkIo = Info[0].BlkIo;
   if (BlkIo == NULL || BlkIo->Media == NULL || !BlkIo->Media->MediaPresent ||
       BlkIo->Media->BlockSize == 0 || (4096 % BlkIo->Media->BlockSize) != 0) {
     DEBUG ((EFI_D_ERROR, "glassine: boot partition unusable: boot_b\n"));
-    return FALSE;
+    return HB_FLOOR;
   }
   PartBytes = (BlkIo->Media->LastBlock + 1) * (UINT64)BlkIo->Media->BlockSize;
   if (PartBytes < 2 * HB_TABLE_SIZE) {
     DEBUG ((EFI_D_ERROR, "glassine: boot partition too small: boot_b\n"));
-    return FALSE;
+    return HB_FLOOR;
   }
 
   /* The region table: the primary, else the backup in the last 4096 bytes. */
@@ -191,6 +193,9 @@ HandbackAsksRecovery (EFI_HANDLE ParentImage)
   case HB_RECOVERY:
     DEBUG ((EFI_D_INFO, "glassine: the loader asks for the recovery\n"));
     break;
+  case HB_ANDROID:
+    DEBUG ((EFI_D_INFO, "glassine: the loader asks for Android, once\n"));
+    break;
   case HB_BASELINE:
     DEBUG ((EFI_D_INFO, "glassine: the loader asks for boot_b\n"));
     break;
@@ -211,5 +216,5 @@ out:
     gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Header, HeaderPages);
   if (Table != NULL)
     gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)Table, TablePages);
-  return Answer == HB_RECOVERY;
+  return Answer;
 }
