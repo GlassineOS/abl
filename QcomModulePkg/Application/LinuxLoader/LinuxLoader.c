@@ -309,14 +309,28 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 
   /* GlassineOS hand-back (GlassineOS/boot spec 012): on slot B
    * only, after every way into fastboot or the recovery above, start the
-   * GlassineOS loader and let it ask for the recovery. Every other outcome,
-   * failures included, leaves BootIntoRecovery as it is: boot_b. */
+   * GlassineOS loader and let it ask for the recovery or for Android once.
+   * Android once = slot _a for this start only, in RAM (SetSlotOnce): no
+   * slot attribute is written, so the next start is slot B's again. Every
+   * other outcome, failures included, leaves both as they are: boot_b. */
   if (MultiSlotBoot && !BootIntoFastboot && !BootIntoRecovery) {
     Slot HbSlot = GetCurrentSlotSuffix ();
 
     if (HbSlot.Suffix[0] == L'_' && HbSlot.Suffix[1] == L'b' &&
-        HbSlot.Suffix[2] == L'\0' && HandbackAsksRecovery (ImageHandle))
-      BootIntoRecovery = TRUE;
+        HbSlot.Suffix[2] == L'\0') {
+      switch (HandbackAsk (ImageHandle)) {
+      case HB_RECOVERY:
+        BootIntoRecovery = TRUE;
+        break;
+      case HB_ANDROID:
+        Status = SetSlotOnce (L"_a");
+        if (Status != EFI_SUCCESS)
+          DEBUG ((EFI_D_ERROR, "glassine: no slot _a (%r): boot_b\n", Status));
+        break;
+      default:
+        break;
+      }
+    }
   }
 
   if (!BootIntoFastboot) {
@@ -325,6 +339,19 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     Info.BootIntoRecovery = BootIntoRecovery;
     Info.BootReasonAlarm = BootReasonAlarm;
     Status = LoadImageAndAuth (&Info);
+    if (Status != EFI_SUCCESS && GetSlotOnce (NULL)) {
+      /* The floor: Android once that can't be loaded is boot_b, as if the
+       * loader had answered the baseline. Nothing was written for it. What
+       * the failed load allocated is left to the firmware. */
+      DEBUG ((EFI_D_ERROR, "glassine: slot _a for this start failed: %r: "
+                           "boot_b\n", Status));
+      ClearSlotOnce ();
+      gBS->SetMem (&Info, sizeof (Info), 0);
+      Info.MultiSlotBoot = MultiSlotBoot;
+      Info.BootIntoRecovery = BootIntoRecovery;
+      Info.BootReasonAlarm = BootReasonAlarm;
+      Status = LoadImageAndAuth (&Info);
+    }
     if (Status != EFI_SUCCESS) {
       DEBUG ((EFI_D_ERROR, "LoadImageAndAuth failed: %r\n", Status));
       goto fastboot;
@@ -533,6 +560,9 @@ na1_vb_done:
   }
 
 fastboot:
+  /* Fastboot shows and acts on the active slot, never on a slot for one
+   * start (BootLinux returned on it). */
+  ClearSlotOnce ();
   DEBUG ((EFI_D_INFO, "Launching fastboot\n"));
   Status = FastbootInitialize ();
   if (EFI_ERROR (Status)) {

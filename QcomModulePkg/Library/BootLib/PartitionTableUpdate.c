@@ -48,6 +48,49 @@ STATIC struct BootPartsLinkedList *HeadNode;
 STATIC EFI_STATUS
 GetActiveSlot (Slot *ActiveSlot);
 
+/* GlassineOS: a slot booted at this start only (SetSlotOnce). It lives in RAM
+ * and is never written: while it is set, GetCurrentSlotSuffix names it, so the
+ * command line (androidboot.slot_suffix), the system path and the verity
+ * backing follow it, and LoadImageAndAuth loads its boot partition without
+ * FindBootableSlot, which would count a retry and mark the slot active. The
+ * attributes on disk keep naming the active slot, so the next start is that
+ * slot's again. */
+STATIC Slot OnceSlot;
+
+EFI_STATUS
+SetSlotOnce (CONST CHAR16 *Suffix)
+{
+  CHAR16 Pname[MAX_GPT_NAME_SIZE] = L"boot";
+
+  if (Suffix == NULL || Suffix[0] != L'_' ||
+      (Suffix[1] != L'a' && Suffix[1] != L'b') || Suffix[2] != L'\0' ||
+      !PartitionHasMultiSlot ((CONST CHAR16 *)L"boot"))
+    return EFI_INVALID_PARAMETER;
+  if (StrnCatS (Pname, ARRAY_SIZE (Pname), Suffix, StrLen (Suffix)) !=
+      EFI_SUCCESS)
+    return EFI_INVALID_PARAMETER;
+  if (GetPartitionIndex (Pname) == INVALID_PTN)
+    return EFI_NOT_FOUND;
+  return StrnCpyS (OnceSlot.Suffix, ARRAY_SIZE (OnceSlot.Suffix), Suffix,
+                   StrLen (Suffix));
+}
+
+BOOLEAN
+GetSlotOnce (Slot *Out)
+{
+  if (OnceSlot.Suffix[0] == L'\0')
+    return FALSE;
+  if (Out != NULL)
+    gBS->CopyMem (Out, &OnceSlot, sizeof (OnceSlot));
+  return TRUE;
+}
+
+VOID
+ClearSlotOnce (VOID)
+{
+  gBS->SetMem (&OnceSlot, sizeof (OnceSlot), 0);
+}
+
 Slot GetCurrentSlotSuffix (VOID)
 {
   Slot CurrentSlot = {{0}};
@@ -56,6 +99,9 @@ Slot GetCurrentSlotSuffix (VOID)
   if (IsMultiSlot == FALSE) {
     return CurrentSlot;
   }
+
+  if (GetSlotOnce (&CurrentSlot))
+    return CurrentSlot;
 
   GetActiveSlot (&CurrentSlot);
   return CurrentSlot;

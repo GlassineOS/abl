@@ -31,7 +31,13 @@ typedef enum {
   HB_BASELINE,
   HB_RECOVERY,
   HB_SET,
+  HB_ANDROID,    /* boot=other:android: the Android slot, this start only */
 } HB_BOOT;
+
+/* What this parent announces in the load options (docs/handback.md, "Load
+ * options", glassine.answers=): the boot= forms it acts on besides baseline.
+ * set: is not among them: this build boots the baseline for it. */
+#define HB_LOAD_OPTIONS L"glassine.handback=1 glassine.answers=recovery,other:android"
 
 typedef UINT32 (*HB_CRC32) (CONST UINT8 *Data, UINTN Size);
 
@@ -57,9 +63,11 @@ HB_BOOT
 HandbackParse (CONST UINT8 *Data, UINTN Size, HB_CRC32 Crc, CHAR8 Id[17]);
 
 /* The firmware side: on the GlassineOS slot, start the loader and read its
- * answer. TRUE only when the answer is the recovery; FALSE in every other
- * case, which is the baseline (boot_b, as without the loader). */
-BOOLEAN
-HandbackAsksRecovery (EFI_HANDLE ParentImage);
+ * answer. HB_RECOVERY or HB_ANDROID when the loader asks for one of them;
+ * every other outcome, failures included, is HB_FLOOR or HB_BASELINE (or
+ * HB_SET, which this build boots as the baseline): boot_b, as without the
+ * loader. */
+HB_BOOT
+HandbackAsk (EFI_HANDLE ParentImage);
 
 #endif

@@ -210,4 +210,8 @@ SetActiveSlot (Slot *NewSlot);
 BOOLEAN IsCurrentSlotBootable (VOID);
 EFI_STATUS HandleActiveSlotUnbootable (VOID);
 EFI_STATUS ClearUnbootable (VOID);
+/* GlassineOS: a slot for this start only, in RAM (PartitionTableUpdate.c). */
+EFI_STATUS SetSlotOnce (CONST CHAR16 *Suffix);
+BOOLEAN GetSlotOnce (Slot *Out);
+VOID ClearSlotOnce (VOID);
 #endif

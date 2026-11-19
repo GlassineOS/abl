@@ -1293,7 +1293,16 @@ LoadImageAndAuth (BootInfo *Info)
   } else {
     Slot CurrentSlot = {{0}};
 
-    GUARD (FindBootableSlot (&CurrentSlot));
+    /* GlassineOS: a slot for this start only (the hand-back's
+     * boot=other:android) bypasses FindBootableSlot, as the recovery branch
+     * above does: no retry counted, no slot marked active, no attribute
+     * written. Its own failures are the caller's (LinuxLoader.c). */
+    if (GetSlotOnce (&CurrentSlot)) {
+      DEBUG ((EFI_D_INFO, "glassine: slot %s for this start only, no "
+                          "attribute written\n", CurrentSlot.Suffix));
+    } else {
+      GUARD (FindBootableSlot (&CurrentSlot));
+    }
     if (IsSuffixEmpty (&CurrentSlot)) {
       DEBUG ((EFI_D_ERROR, "No bootable slot\n"));
       return EFI_LOAD_ERROR;

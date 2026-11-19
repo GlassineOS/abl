@@ -271,6 +271,10 @@ HandbackParse (CONST UINT8 *Data, UINTN Size, HB_CRC32 Crc, CHAR8 Id[17])
     return HB_BASELINE;
   if (Same (Boot, BootLen, "recovery", 8))
     return HB_RECOVERY;
+  /* other:<name>, the parent's other system: only the one this parent
+   * announces (HB_LOAD_OPTIONS). Any other name is not a form it knows. */
+  if (Same (Boot, BootLen, "other:android", 13))
+    return HB_ANDROID;
   if (BootLen == 20 && Same (Boot, 4, "set:", 4)) {
     for (I = 0; I < 16; I++) {
       if (!IsLowerHex (Boot[4 + I]))
