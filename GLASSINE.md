@@ -45,6 +45,7 @@ One commit per change, in this order:
 | BootLib, avb: boot the recovery partition on an A/B table | stock A/B bootloaders only boot `boot_<slot>` |
 | LinuxLoader: point the verity device at the active slot's system | stock hard-wires slot A's system partition |
 | LinuxLoader: start the GlassineOS loader on slot B; the loader from the boot partition's region table (branch `glassine/handback`, not flashed) | the loader counts starts and can ask for the recovery; any failure boots `boot_b` as before |
+| LinuxLoader: Android once from the hand-back, no slot attribute written (branch `glassine/android-once`, on `glassine/handback`; not flashed) | the loader's start menu can start slot A's Android for one start (`boot=other:android`); the slot is held in RAM, no GPT attribute is written, so the next start is slot B's |
 
 Each commit message says how the change can fail and the way back. Only the tag is
 build-tested: the commits before it were split by hand and haven't been built one by
@@ -132,6 +133,13 @@ the flashed build's stamps: `FVMAIN` 315,584 / 315,568 / 16, `FVMAIN_COMPACT` 13
 `ec947085ee2d0ee4107b693d928e0e2529c16000de31eddb6fed1f5e6e554cb0`, the same in two
 builds. `glassine/test-handback` runs the region table, header and answer checks on the
 host.
+
+The `glassine/android-once` branch (Android once, not flashed) at the commit that adds
+it, with the same stamps: `FVMAIN` 319,680 / 319,664 / 16, `FVMAIN_COMPACT` 139,264 /
+92,432 / 46,832 (384 bytes more than `glassine/handback`); `abl-unsigned.elf` sha256
+`f8ea89dbba679e094fbec002fc4a27c42341ebdd475beba0a67d01c0cb455af0`, `abl.elf` sha256
+`bb5710ed68ef7fdb28482c2b627f98ece86d081dd44640bf744676aa33943cad`, the same in two
+builds. `glassine/test-handback` covers the `other:android` answer.
 
 `FVMAIN` is sized to fit what it holds, so its 16 free bytes are alignment padding, not
 a limit. A build with 8 KiB of data added to `LinuxLoader` gave an `FVMAIN` of 319,680
